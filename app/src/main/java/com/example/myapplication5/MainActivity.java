@@ -94,7 +94,7 @@ public class MainActivity extends AppCompatActivity {
     private static String address = "20:15:04:14:00:91";  // адрес HC-05
 
     TessBaseAPI tessBaseApi;   // будем использовать для распознавания текста
-    Mat temple_arrow_right;
+    Mat temple_arrow_right;    // шаблоны, по которым будем искать объекты
     Mat temple_arrow_left;
     Mat temple_arrow_top_right;
     Mat temple_arrow_top_left;
@@ -121,22 +121,19 @@ public class MainActivity extends AppCompatActivity {
     private int Speed_cams_ya_is_checked;
     private int Speed_cams_mapcam_is_checked;
 
-
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-
-
-        //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-        btAdapter = BluetoothAdapter.getDefaultAdapter();
+        //+++++++++++++++++ проверяем доступность BT адаптера +++++++++++++++++++++++++++++++++++++++++++++++++++++
+        btAdapter = BluetoothAdapter.getDefaultAdapter();  
         checkBTState();
-        //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        //+++++++++++++++  запускаем фоновый сервис   ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
         setContentView(R.layout.activity_main);
         serviceIntent = new Intent(this, ForegroundService.class);
         serviceIntent.putExtra("inputExtra", "Foreground Service Example in Android");
         ContextCompat.startForegroundService(this, serviceIntent);
-        //++++++++++++++++++++++++++  ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        //++++++++++++++++++++++++++   ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
         DisplayMetrics metrics = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getMetrics(metrics);
         WindowManager windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
@@ -150,13 +147,8 @@ public class MainActivity extends AppCompatActivity {
         Log.e(TAG, "...DISPLAY_DPI..." + DISPLAY_DPI);
 
        //+**********************************************************************************************************
-
-
         Context saveContext = this;
         imageReader = ImageReader.newInstance(DISPLAY_WIDTH, DISPLAY_HEIGHT, PixelFormat.RGBA_8888, 2); // 0x1 - формат RGBA_8888I mageFormat.JPEG
-
-
-
         mProjectionManager = (MediaProjectionManager) getSystemService
                 (Context.MEDIA_PROJECTION_SERVICE);
         mcheckBox_speed = findViewById(R.id.checkBox_speed);
@@ -169,7 +161,7 @@ public class MainActivity extends AppCompatActivity {
         mToggleButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if(mcheckBox_speed.isChecked()){
+                if(mcheckBox_speed.isChecked()){   // проверяем какие опции распознавания выбраны на стартовом экране
                     Speed_is_checked = 1;
                 }
                 if(mcheckBox_turns.isChecked()){
@@ -181,6 +173,7 @@ public class MainActivity extends AppCompatActivity {
                 if(mcheckBox_speed_cams_mapcam.isChecked()){
                     Speed_cams_mapcam_is_checked = 1;
                 }
+                // проверяем разрешения и запускаем получение картинки через интент
                 serviceIntent.putExtra("inputExtra", "Screen Recording in Progress");
                 ContextCompat.startForegroundService(saveContext, serviceIntent);
                 if (ContextCompat.checkSelfPermission(MainActivity.this,
@@ -207,7 +200,7 @@ public class MainActivity extends AppCompatActivity {
                                 REQUEST_PERMISSIONS);
                     }
                 } else {
-                   onToggleSave(v);
+                   onToggleSave(v); // обработчик картинки
                 }
             }
         });
