@@ -71,7 +71,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_CODE = 1000;
 
     private MediaProjectionManager mProjectionManager;
-    private static int DISPLAY_WIDTH = 1080;
+    private static int DISPLAY_WIDTH = 1080; // ширина и высота экрана по умолчанию
     private static int DISPLAY_HEIGHT = 2265;
     private int DISPLAY_DPI = 480;
     private MediaProjection mMediaProjection;
@@ -85,15 +85,15 @@ public class MainActivity extends AppCompatActivity {
     private Intent serviceIntent;
 
     //+++++++++++++ bluetooth   ++++++++++++++++++++++++++++++++++++++++++++++++++++
-    private static final int REQUEST_ENABLE_BT = 1;
+    private static final int REQUEST_ENABLE_BT = 1; 
     private BluetoothAdapter btAdapter = null;
     private BluetoothSocket btSocket = null;
     private OutputStream outStream = null;
 
-    private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-    private static String address = "20:15:04:14:00:91";
+    private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"); // UUID для HC-05
+    private static String address = "20:15:04:14:00:91";  // адрес HC-05
 
-    TessBaseAPI tessBaseApi;
+    TessBaseAPI tessBaseApi;   // будем использовать для распознавания текста
     Mat temple_arrow_right;
     Mat temple_arrow_left;
     Mat temple_arrow_top_right;
