@@ -1,0 +1,142 @@
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FBFBFB"
+    android:paddingLeft="@dimen/activity_horizontal_margin"
+    android:paddingTop="@dimen/activity_vertical_margin"
+    android:paddingRight="@dimen/activity_horizontal_margin"
+    android:paddingBottom="@dimen/activity_vertical_margin"
+    tools:context=".MainActivity">
+
+
+    <ToggleButton
+        android:id="@+id/toggle"
+        android:layout_width="230dp"
+        android:layout_height="84dp"
+
+        android:layout_below="@+id/checkBox_start_mapcam"
+        android:layout_alignParentStart="true"
+        android:layout_marginStart="50dp"
+        android:layout_marginTop="50dp"
+        android:background="#F9A825"
+        android:textColor="#070707"
+        android:textOff="START"
+        android:textOn="STOP"
+        android:textSize="34sp"
+        android:textStyle="bold" />
+
+    <CheckBox
+        android:id="@+id/checkBox_speed"
+        android:layout_width="213dp"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/editTextText"
+        android:layout_alignParentStart="true"
+        android:layout_marginStart="48dp"
+        android:layout_marginTop="30dp"
+
+        android:checked="false"
+        android:clickable="true"
+        android:fontFamily="monospace"
+        android:text="Ограничения скорости яндекс"
+        android:textAlignment="viewStart"
+        android:textAppearance="@style/TextAppearance.AppCompat.Body1"
+        android:textColor="#0B0B0B"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <CheckBox
+        android:id="@+id/checkBox_turns"
+        android:layout_width="191dp"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/checkBox_speed"
+        android:layout_alignStart="@+id/checkBox_speed"
+        android:layout_marginStart="0dp"
+        android:layout_marginTop="30dp"
+        android:checked="false"
+        android:fontFamily="monospace"
+        android:text="Повороты яндекс"
+        android:textColor="#0F0E0E"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <CheckBox
+        android:id="@+id/checkBox_speed_cams_yandex"
+        android:layout_width="264dp"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/checkBox_turns"
+        android:layout_alignStart="@+id/checkBox_speed"
+        android:layout_marginStart="0dp"
+        android:layout_marginTop="30dp"
+        android:checked="false"
+        android:fontFamily="monospace"
+        android:text="Камеры замера скорости яндекс"
+        android:textColor="#090909"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <CheckBox
+        android:id="@+id/checkBox_speed_mapcams"
+        android:layout_width="264dp"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/checkBox_speed_cams_yandex"
+        android:layout_alignStart="@+id/checkBox_speed"
+        android:layout_marginStart="0dp"
+        android:layout_marginTop="30dp"
+        android:checked="true"
+        android:fontFamily="monospace"
+        android:text="Камеры замера скорости mapcam"
+        android:textColor="#0D0D0D"
+        android:textColorLink="@android:color/holo_orange_dark"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <CheckBox
+        android:id="@+id/checkBox_start_ya_navi"
+        android:layout_width="264dp"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/checkBox_speed_mapcams"
+        android:layout_alignStart="@+id/checkBox_speed"
+        android:layout_marginStart="0dp"
+        android:layout_marginTop="50dp"
+        android:checked="false"
+        android:fontFamily="sans-serif-black"
+        android:text="Запустить Яндекс навигатор"
+        android:textColor="#0D0D0D"
+        android:textColorLink="@android:color/holo_orange_dark"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <CheckBox
+        android:id="@+id/checkBox_start_mapcam"
+        android:layout_width="264dp"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/checkBox_start_ya_navi"
+        android:layout_alignStart="@+id/checkBox_speed"
+        android:layout_marginStart="0dp"
+        android:layout_marginTop="30dp"
+        android:checked="false"
+        android:fontFamily="sans-serif-black"
+        android:text="Запустить mapcam"
+        android:textColor="#0D0D0D"
+        android:textColorLink="@android:color/holo_orange_dark"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <EditText
+        android:id="@+id/editTextText"
+        android:layout_width="370dp"
+        android:layout_height="wrap_content"
+        android:layout_alignParentStart="true"
+        android:layout_alignParentTop="true"
+        android:layout_marginStart="38dp"
+        android:layout_marginTop="20dp"
+        android:ems="10"
+        android:fontFamily="monospace"
+        android:inputType="text"
+        android:text="Вывод на проекцию"
+        android:textColor="#0B0B0B"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+</RelativeLayout>
