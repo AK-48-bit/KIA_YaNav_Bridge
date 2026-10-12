@@ -21,6 +21,7 @@ public class ExampleInstrumentedTest {
     public void useAppContext() {
         // Context of the app under test.
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertEquals("com.example.myapplication5.kia2", appContext.getPackageName());
+        // Package name depends on the selected product flavor.
+        assertTrue(appContext.getPackageName().startsWith("com.example.myapplication5"));
     }
 }

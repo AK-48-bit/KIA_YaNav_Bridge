@@ -7,13 +7,38 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.myapplication5.kia2"
+        // Base applicationId. Each flavor adds its own suffix so that the
+        // resulting apps can be installed side by side on the same device.
+        applicationId = "com.example.myapplication5"
         minSdk = 29
         targetSdk = 29
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // One flavor per installable variant. All three share the same code base
+    // and only differ in applicationId, app name and launcher icon.
+    flavorDimensions += "version"
+    productFlavors {
+        create("original") {
+            dimension = "version"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
+            resValue("string", "app_name", "KIA Sorento bridge")
+        }
+        create("kia2") {
+            dimension = "version"
+            applicationIdSuffix = ".kia2"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_kia2"
+            resValue("string", "app_name", "KIA Sorento bridge 2")
+        }
+        create("kia3") {
+            dimension = "version"
+            applicationIdSuffix = ".kia3"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_kia3"
+            resValue("string", "app_name", "KIA Sorento bridge 3")
+        }
     }
 
     buildTypes {
