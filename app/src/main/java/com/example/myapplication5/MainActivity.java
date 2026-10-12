@@ -75,7 +75,6 @@ public class MainActivity extends AppCompatActivity {
     private static int DISPLAY_HEIGHT = 2265;
     private int DISPLAY_DPI = 480;
     private MediaProjection mMediaProjection;
-    private VirtualDisplay mVirtualDisplay;
     private VirtualDisplay mVirtualDisplayImg;
     private MediaProjectionCallback mMediaProjectionCallback;
     private ToggleButton mToggleButton;
@@ -1098,11 +1097,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void stopScreenSharing() {
-        if (mVirtualDisplay == null) {
+        if (mVirtualDisplayImg == null) {
             return;
         }
         stopService(serviceIntent);
-        mVirtualDisplay.release();
+        mVirtualDisplayImg.release();
+        mVirtualDisplayImg = null;
         destroyMediaProjection();
         tessBaseApi.end();
     }
@@ -1135,30 +1135,31 @@ public class MainActivity extends AppCompatActivity {
                                            @NonNull String[] permissions,
                                            @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        switch (requestCode) {
-            case REQUEST_PERMISSIONS: {
-                if ((grantResults.length > 0) && (grantResults[0] +
-                        grantResults[1]) == PackageManager.PERMISSION_GRANTED) {
-                    //onToggleScreenShare(mToggleButton);
-                } else {
-                    mToggleButton.setChecked(false);
-                    Snackbar.make(findViewById(android.R.id.content), R.string.label_permissions,
-                            Snackbar.LENGTH_INDEFINITE).setAction("ENABLE",
-                            new View.OnClickListener() {
-                                @Override
-                                public void onClick(View v) {
-                                    Intent intent = new Intent();
-                                    intent.setAction(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-                                    intent.addCategory(Intent.CATEGORY_DEFAULT);
-                                    intent.setData(Uri.parse("package:" + getPackageName()));
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
-                                    startActivity(intent);
-                                }
-                            }).show();
+        if (requestCode == REQUEST_PERMISSIONS) {
+            boolean allGranted = grantResults.length > 0;
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
+                    allGranted = false;
+                    break;
                 }
-                return;
+            }
+            if (!allGranted) {
+                mToggleButton.setChecked(false);
+                Snackbar.make(findViewById(android.R.id.content), R.string.label_permissions,
+                        Snackbar.LENGTH_INDEFINITE).setAction("ENABLE",
+                        new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                Intent intent = new Intent();
+                                intent.setAction(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                                intent.addCategory(Intent.CATEGORY_DEFAULT);
+                                intent.setData(Uri.parse("package:" + getPackageName()));
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
+                                intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+                                startActivity(intent);
+                            }
+                        }).show();
             }
         }
     }

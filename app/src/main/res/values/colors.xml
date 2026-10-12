@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Legacy -->
     <color name="purple_200">#FFBB86FC</color>
     <color name="purple_500">#FF6200EE</color>
     <color name="purple_700">#FF3700B3</color>
@@ -7,4 +8,18 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- App palette -->
+    <color name="background">#F4F5F7</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="outline">#E3E6EA</color>
+    <color name="on_surface">#14161A</color>
+    <color name="on_surface_variant">#6B7280</color>
+
+    <color name="accent">#F9A825</color>
+    <color name="accent_dark">#C17900</color>
+    <color name="on_accent">#1A1C1E</color>
+
+    <color name="stop">#1F2329</color>
+    <color name="on_stop">#FFFFFF</color>
 </resources>

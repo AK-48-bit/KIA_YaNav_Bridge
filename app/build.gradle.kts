@@ -7,9 +7,9 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.myapplication5"
+        applicationId = "com.example.myapplication5.kia2"
         minSdk = 29
-        targetSdk = 34
+        targetSdk = 29
         versionCode = 1
         versionName = "1.0"
 

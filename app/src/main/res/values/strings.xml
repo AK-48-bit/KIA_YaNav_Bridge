@@ -1,6 +1,20 @@
 <resources>
-    <string name="app_name">KIA Sorento bridge</string>
+    <string name="app_name">KIA Sorento bridge 2</string>
     <string name="hello_world">Hello world!</string>
     <string name="action_settings">Settings</string>
     <string name="label_permissions">Please enable Microphone and Storage permissions.</string>
+
+    <!-- Main screen -->
+    <string name="brand_name">KIA SORENTO BRIDGE</string>
+    <string name="screen_title">Вывод на проекцию</string>
+    <string name="section_recognition">РАСПОЗНАВАНИЕ</string>
+    <string name="section_autostart">АВТОЗАПУСК</string>
+    <string name="cb_speed">Ограничения скорости — Яндекс</string>
+    <string name="cb_turns">Повороты — Яндекс</string>
+    <string name="cb_cams_yandex">Камеры скорости — Яндекс</string>
+    <string name="cb_cams_mapcam">Камеры скорости — Mapcam</string>
+    <string name="cb_start_ya_navi">Запустить Яндекс Навигатор</string>
+    <string name="cb_start_mapcam">Запустить Mapcam</string>
+    <string name="toggle_off">START</string>
+    <string name="toggle_on">STOP</string>
 </resources>
