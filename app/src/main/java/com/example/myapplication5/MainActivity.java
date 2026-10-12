@@ -92,6 +92,15 @@ public class MainActivity extends AppCompatActivity {
     private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"); // UUID для HC-05
     private static String address = "20:15:04:14:00:91";  // адрес HC-05
 
+    // ++++++++++++++++++++++++++  HC-05 watchdog  ++++++++++++++++++++++++++++++
+    private volatile boolean btConnected = false;      // RFCOMM link to HC-05 is up
+    private volatile boolean sessionActive = false;    // capture consented and not stopped
+    private volatile boolean btMonitorRunning = false; // watchdog thread should keep looping
+    private volatile boolean btLostNotified = false;   // avoid duplicate "lost" handling
+    private Thread btMonitorThread;
+    private static final long BT_CHECK_INTERVAL_MS = 3000; // liveness/retry period
+    private final Object btLock = new Object();
+
     TessBaseAPI tessBaseApi;   // будем использовать для распознавания текста
     Mat temple_arrow_right;    // шаблоны, по которым будем искать объекты
     Mat temple_arrow_left;
@@ -203,6 +212,9 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+
+        // Keep the HC-05 link alive for the whole lifetime of the activity.
+        startBtMonitor();
     }
 
     @Override
@@ -230,11 +242,9 @@ public class MainActivity extends AppCompatActivity {
         mMediaProjectionCallback = new MediaProjectionCallback();
         mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data);
         mMediaProjection.registerCallback(mMediaProjectionCallback, null);
-        mVirtualDisplayImg = mMediaProjection.createVirtualDisplay("MainActivity",
-                DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_DPI,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader.getSurface(), null /*Callbacks*/, null
-                /*Handler*/);
+        // NOTE: the VirtualDisplay is created by resumeCapture() as soon as the
+        // HC-05 link is up (see the HC-05 watchdog below). This keeps capture,
+        // recognition and transmission tied to a live controller.
 
         tessBaseApi = new TessBaseAPI();
         tessBaseApi.init(Environment.getExternalStorageDirectory().getAbsolutePath(), "Rus");
@@ -281,63 +291,15 @@ public class MainActivity extends AppCompatActivity {
         temple_speed_cam_mapcam = Imgcodecs.imread("/storage/emulated/0/Pictures/Screenshots/speed_cam_mapcam_big.png");
         Imgproc.cvtColor(temple_speed_cam_mapcam, temple_speed_cam_mapcam, Imgproc.COLOR_BGR2GRAY);
 
-        Log.d(TAG, "...onResume - попытка соединения...");
-
-        // Set up a pointer to the remote node using it's address.
-        BluetoothDevice device = btAdapter.getRemoteDevice(address);
-
-        // Two things are needed to make a connection:
-        //   A MAC address, which we got above.
-        //   A Service ID or UUID.  In this case we are using the
-        //     UUID for SPP.
-        try {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                // TODO: Consider calling
-                //    ActivityCompat#requestPermissions
-                // here to request the missing permissions, and then overriding
-                //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                //                                          int[] grantResults)
-                // to handle the case where the user grants the permission. See the documentation
-                // for ActivityCompat#requestPermissions for more details.
-                Log.d(TAG, "...onResume - PERMISSION_GRANTED...");
-                //return;
-            }
-            Log.d(TAG, "...onResume - createRfcommSocketToServiceRecord 1...");
-            btSocket = device.createRfcommSocketToServiceRecord(MY_UUID);
-            Log.d(TAG, "...onResume - createRfcommSocketToServiceRecord 2...");
-        } catch (IOException e) {
-            errorExit("Fatal Error", "In onResume() and socket create failed: " + e.getMessage() + ".");
+        // The HC-05 watchdog (started in onCreate) connects to the controller off
+        // the UI thread and creates the VirtualDisplay once the link is up.
+        sessionActive = true;
+        if (btConnected) {
+            resumeCapture();
+        } else {
+            Log.d(TAG, "...Ждём подключения HC-05 перед началом захвата...");
         }
-
-        // Discovery is resource intensive.  Make sure it isn't going on
-        // when you attempt to connect and pass your message.
-        Log.d(TAG, "...onResume - cancelDiscovery...");
-        btAdapter.cancelDiscovery();
-
-
-        // Establish the connection.  This will block until it connects.
-        Log.d(TAG, "...onResume. Соединяемся...");
-        try {
-            btSocket.connect();
-            Log.d(TAG, "...onResume. Соединение установлено и готово к передачи данных...");
-        } catch (IOException e) {
-            try {
-                btSocket.close();
-            } catch (IOException e2) {
-                errorExit("Fatal Error", "In onResume() and unable to close socket during connection failure" + e2.getMessage() + ".");
-            }
-        }
-
-        // Create a data stream so we can talk to server.
-        try {
-            outStream = btSocket.getOutputStream();
-            Log.d(TAG, "...onResume. Создание getOutputStream...");
-        } catch (IOException e) {
-            errorExit("Fatal Error", "In onResume() and output stream creation failed:" + e.getMessage() + ".");
-        }
-
-
-        }
+    }
     public void onToggleSave(View view) {
 
         //System.out.println("Out_onToggleSave");
@@ -1018,16 +980,17 @@ public class MainActivity extends AppCompatActivity {
         return bmp;
     }
     private void sendDBytes(byte messageBytes) {
-        //byte[] msgBuffer = messageBytes;
-
+        // Silent no-op while the HC-05 controller is absent.
+        if (!btConnected || outStream == null) {
+            return;
+        }
         Log.d(TAG, "...Bluetooth. Посылаем данные: " + messageBytes);
-
         try {
             outStream.write(messageBytes);
             Log.d(TAG, "...Bluetooth. данные sended: " + messageBytes);
         } catch (IOException e) {
-            String msg = "In onResume() and an exception occurred during write: " + e.getMessage();
-            errorExit("Fatal Error", msg);
+            // Controller disappeared - pause the pipeline and start re-connecting.
+            handleBtFailure(e);
         }
     }
     @SuppressLint("QueryPermissionsNeeded")
@@ -1096,29 +1059,187 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void stopScreenSharing() {
-        if (mVirtualDisplayImg == null) {
+    // =========================================================================
+    //  HC-05 connection watchdog
+    // =========================================================================
+
+    /**
+     * Background thread that keeps the HC-05 link alive for the activity's whole
+     * lifetime. While disconnected it retries every {@link #BT_CHECK_INTERVAL_MS}
+     * ms; while connected it watches for a lost link and pauses the pipeline.
+     */
+    private void startBtMonitor() {
+        if (btMonitorRunning) {
             return;
         }
+        btMonitorRunning = true;
+        btMonitorThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (btMonitorRunning) {
+                    if (!btConnected) {
+                        if (tryConnectBt()) {
+                            btConnected = true;
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    onBtRestored();
+                                }
+                            });
+                        }
+                    } else if (btSocket == null || !btSocket.isConnected()) {
+                        btConnected = false;
+                        closeBtSocket();
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                onBtLost();
+                            }
+                        });
+                    }
+                    try {
+                        Thread.sleep(BT_CHECK_INTERVAL_MS);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+            }
+        }, "HC05-watchdog");
+        btMonitorThread.start();
+    }
+
+    private void stopBtMonitor() {
+        btMonitorRunning = false;
+        if (btMonitorThread != null) {
+            btMonitorThread.interrupt();
+            btMonitorThread = null;
+        }
+    }
+
+    /** Blocking attempt to (re)connect to HC-05. Always called off the UI thread. */
+    @SuppressLint("MissingPermission")
+    private boolean tryConnectBt() {
+        synchronized (btLock) {
+            if (btAdapter == null || !btAdapter.isEnabled()) {
+                return false;
+            }
+            closeBtSocket();
+            try {
+                BluetoothDevice device = btAdapter.getRemoteDevice(address);
+                btSocket = device.createRfcommSocketToServiceRecord(MY_UUID);
+                btAdapter.cancelDiscovery();
+                btSocket.connect();
+                outStream = btSocket.getOutputStream();
+                Log.d(TAG, "...HC-05 подключён...");
+                return true;
+            } catch (Exception e) {
+                Log.e(TAG, "...HC-05 connect failed: " + e.getMessage());
+                closeBtSocket();
+                return false;
+            }
+        }
+    }
+
+    /** Silent close of the socket/stream. Safe to call repeatedly. */
+    private void closeBtSocket() {
+        synchronized (btLock) {
+            try {
+                if (outStream != null) {
+                    outStream.close();
+                }
+            } catch (IOException ignored) {
+            }
+            outStream = null;
+            try {
+                if (btSocket != null) {
+                    btSocket.close();
+                }
+            } catch (IOException ignored) {
+            }
+            btSocket = null;
+        }
+    }
+
+    /** UI thread: the HC-05 link disappeared - stop capture/recognition/transfer. */
+    private void onBtLost() {
+        if (btLostNotified) {
+            return;
+        }
+        btLostNotified = true;
+        Log.e(TAG, "...HC-05 потерян. Захват и распознавание приостановлены...");
+        pauseCapture();
+        if (sessionActive) {
+            Toast.makeText(getBaseContext(), "HC-05 потерян. Ожидание подключения...", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** UI thread: the HC-05 link is back - resume the full pipeline. */
+    private void onBtRestored() {
+        btLostNotified = false;
+        Log.d(TAG, "...HC-05 подключён. Продолжаю захват, распознавание и передачу...");
+        if (sessionActive) {
+            resumeCapture();
+            Toast.makeText(getBaseContext(), "HC-05 подключён. Продолжаю работу.", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** Called from a failed write - the controller is gone. */
+    private void handleBtFailure(Exception e) {
+        Log.e(TAG, "...Bluetooth write failed: " + e.getMessage());
+        // Do not close the socket here (it would block); the watchdog reconnects.
+        btConnected = false;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                onBtLost();
+            }
+        });
+    }
+
+    /** Releases the VirtualDisplay (stops frames) but keeps the MediaProjection alive. */
+    private void pauseCapture() {
+        if (mVirtualDisplayImg != null) {
+            mVirtualDisplayImg.release();
+            mVirtualDisplayImg = null;
+        }
+    }
+
+    /** Re-creates the VirtualDisplay from the still-valid MediaProjection. */
+    private void resumeCapture() {
+        if (mMediaProjection == null || mVirtualDisplayImg != null) {
+            return;
+        }
+        mVirtualDisplayImg = mMediaProjection.createVirtualDisplay("MainActivity",
+                DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_DPI,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.getSurface(), null /*Callbacks*/, null /*Handler*/);
+    }
+
+    /** Full stop of the capture session (user pressed STOP or projection ended). */
+    private void stopScreenSharing() {
+        sessionActive = false;
+        pauseCapture();
         stopService(serviceIntent);
-        mVirtualDisplayImg.release();
-        mVirtualDisplayImg = null;
         destroyMediaProjection();
-        tessBaseApi.end();
+        if (tessBaseApi != null) {
+            tessBaseApi.end();
+            tessBaseApi = null;
+        }
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
+        sessionActive = false;
+        btConnected = false;
+        stopBtMonitor();
         stopService(serviceIntent);
         destroyMediaProjection();
-        try {
-            outStream.close();
-            btSocket.close();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        closeBtSocket();
+        if (tessBaseApi != null) {
+            tessBaseApi.end();
+            tessBaseApi = null;
         }
-
     }
 
     private void destroyMediaProjection() {
