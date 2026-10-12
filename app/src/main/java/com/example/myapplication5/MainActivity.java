@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
@@ -36,6 +37,7 @@ import android.view.Display;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.CheckBox;
+import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ToggleButton;
 
@@ -100,6 +102,8 @@ public class MainActivity extends AppCompatActivity {
     private Thread btMonitorThread;
     private static final long BT_CHECK_INTERVAL_MS = 3000; // liveness/retry period
     private final Object btLock = new Object();
+    private TextView btStatusText;   // "HC-05: подключён / нет связи" indicator
+    private View btStatusDot;
 
     TessBaseAPI tessBaseApi;   // будем использовать для распознавания текста
     Mat temple_arrow_right;    // шаблоны, по которым будем искать объекты
@@ -166,6 +170,9 @@ public class MainActivity extends AppCompatActivity {
         mcheckBox_start_yandex_navi = findViewById(R.id.checkBox_start_ya_navi);
         mcheckBox_start_mapcam = findViewById(R.id.checkBox_start_mapcam);
         mToggleButton = findViewById(R.id.toggle);
+        btStatusText = findViewById(R.id.btStatusText);
+        btStatusDot = findViewById(R.id.btStatusDot);
+        updateBtStatus(false);
         mToggleButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -1160,6 +1167,17 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** Reflects the HC-05 link state in the on-screen indicator. */
+    private void updateBtStatus(boolean connected) {
+        if (btStatusText == null || btStatusDot == null) {
+            return;
+        }
+        int color = ContextCompat.getColor(this, connected ? R.color.status_ok : R.color.status_off);
+        btStatusText.setText(connected ? R.string.bt_status_connected : R.string.bt_status_disconnected);
+        btStatusText.setTextColor(color);
+        btStatusDot.setBackgroundTintList(ColorStateList.valueOf(color));
+    }
+
     /** UI thread: the HC-05 link disappeared - stop capture/recognition/transfer. */
     private void onBtLost() {
         if (btLostNotified) {
@@ -1167,6 +1185,7 @@ public class MainActivity extends AppCompatActivity {
         }
         btLostNotified = true;
         Log.e(TAG, "...HC-05 потерян. Захват и распознавание приостановлены...");
+        updateBtStatus(false);
         pauseCapture();
         if (sessionActive) {
             Toast.makeText(getBaseContext(), "HC-05 потерян. Ожидание подключения...", Toast.LENGTH_SHORT).show();
@@ -1177,6 +1196,7 @@ public class MainActivity extends AppCompatActivity {
     private void onBtRestored() {
         btLostNotified = false;
         Log.d(TAG, "...HC-05 подключён. Продолжаю захват, распознавание и передачу...");
+        updateBtStatus(true);
         if (sessionActive) {
             resumeCapture();
             Toast.makeText(getBaseContext(), "HC-05 подключён. Продолжаю работу.", Toast.LENGTH_SHORT).show();

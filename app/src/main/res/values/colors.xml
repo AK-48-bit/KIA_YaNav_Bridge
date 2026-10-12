@@ -22,4 +22,10 @@
 
     <color name="stop">#1F2329</color>
     <color name="on_stop">#FFFFFF</color>
+
+    <!-- HC-05 connection status -->
+    <color name="status_ok">#2E7D32</color>
+    <color name="status_off">#C0392B</color>
+    <color name="status_ok_bg">#E6F4EA</color>
+    <color name="status_off_bg">#FBEAE8</color>
 </resources>

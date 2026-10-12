@@ -17,4 +17,8 @@
     <string name="cb_start_mapcam">Запустить Mapcam</string>
     <string name="toggle_off">START</string>
     <string name="toggle_on">STOP</string>
+
+    <!-- HC-05 status -->
+    <string name="bt_status_connected">HC-05: подключён</string>
+    <string name="bt_status_disconnected">HC-05: нет связи, поиск…</string>
 </resources>
