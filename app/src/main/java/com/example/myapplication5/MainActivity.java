@@ -22,6 +22,12 @@ import android.media.MediaRecorder;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
+import android.nfc.NdefMessage;
+import android.nfc.NdefRecord;
+import android.nfc.NfcAdapter;
+import android.nfc.Tag;
+import android.nfc.tech.Ndef;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
@@ -110,6 +116,15 @@ public class MainActivity extends AppCompatActivity {
     private View btStatusDot;
     private int frameCount = 0;      // DIAG: processed frames counter
 
+    // ++++++++++++++++++++++++++  NFC  ++++++++++++++++++++++++++++++++++++++++
+    // UID of the transport card kept in the car holder. Only this tag will
+    // launch the app; any other MIFARE tag is ignored.
+    private static final String TARGET_NFC_UID = "041B889A201D90";
+    // NDEF URI to write on a writable tag (NTAG213). Must match the intent
+    // filter declared for NDEF_DISCOVERED in AndroidManifest.xml.
+    private static final String NFC_TRIGGER_URI = "kia-bridge://go";
+    private NfcAdapter nfcAdapter;
+
     TessBaseAPI tessBaseApi;   // будем использовать для распознавания текста
     Mat temple_arrow_right;    // шаблоны, по которым будем искать объекты
     Mat temple_arrow_left;
@@ -142,6 +157,13 @@ public class MainActivity extends AppCompatActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // When started by tapping a tag, continue only for the configured card.
+        if (!isNfcLaunchAllowed(getIntent())) {
+            Log.d(TAG, "NFC: чужая метка - приложение не открываем");
+            finish();
+            return;
+        }
+
         //+++++++++++++++++ проверяем доступность BT адаптера +++++++++++++++++++++++++++++++++++++++++++++++++++++
         btAdapter = BluetoothAdapter.getDefaultAdapter();  
         checkBTState();
@@ -150,6 +172,14 @@ public class MainActivity extends AppCompatActivity {
         serviceIntent = new Intent(this, ForegroundService.class);
         serviceIntent.putExtra("inputExtra", "Foreground Service Example in Android");
         ContextCompat.startForegroundService(this, serviceIntent);
+
+        // NFC reader for tag diagnostics / triggering
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this);
+        if (nfcAdapter == null) {
+            Log.w(TAG, "NFC: не поддерживается устройством");
+        } else if (!nfcAdapter.isEnabled()) {
+            Log.w(TAG, "NFC: выключен в настройках");
+        }
         //++++++++++++++++++++++++++   ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
         DisplayMetrics metrics = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getMetrics(metrics);
@@ -227,6 +257,147 @@ public class MainActivity extends AppCompatActivity {
 
         // Keep the HC-05 link alive for the whole lifetime of the activity.
         startBtMonitor();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (nfcAdapter != null) {
+            Bundle options = new Bundle();
+            options.putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250);
+            nfcAdapter.enableReaderMode(this,
+                    new NfcAdapter.ReaderCallback() {
+                        @Override
+                        public void onTagDiscovered(Tag tag) {
+                            logNfcTag(tag);
+                        }
+                    },
+                    NfcAdapter.FLAG_READER_NFC_A
+                            | NfcAdapter.FLAG_READER_NFC_B
+                            | NfcAdapter.FLAG_READER_NFC_F
+                            | NfcAdapter.FLAG_READER_NFC_V
+                            | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+                    options);
+            Log.d(TAG, "NFC: reader mode enabled");
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (nfcAdapter != null) {
+            nfcAdapter.disableReaderMode(this);
+        }
+    }
+
+    /** DIAG: logs the UID, technologies and NDEF details of a tapped tag. */
+    private void logNfcTag(Tag tag) {
+        StringBuilder uid = new StringBuilder();
+        for (byte b : tag.getId()) {
+            uid.append(String.format("%02X", b));
+        }
+        StringBuilder tech = new StringBuilder();
+        for (String t : tag.getTechList()) {
+            tech.append(t.replace("android.nfc.tech.", "")).append(' ');
+        }
+
+        StringBuilder ndefInfo = new StringBuilder("none");
+        Ndef ndef = Ndef.get(tag);
+        if (ndef != null) {
+            try {
+                ndef.connect();
+                NdefMessage msg = ndef.getNdefMessage();
+                ndefInfo = new StringBuilder();
+                ndefInfo.append("writable=").append(ndef.isWritable())
+                        .append(" maxSize=").append(ndef.getMaxSize())
+                        .append(" type=").append(ndef.getType())
+                        .append(" records=").append(msg == null ? 0 : msg.getRecords().length);
+                if (msg != null) {
+                    for (NdefRecord r : msg.getRecords()) {
+                        ndefInfo.append(" [tnf=").append(r.getTnf())
+                                .append(" payload=").append(bytesToHex(r.getPayload()))
+                                .append("]");
+                    }
+                }
+            } catch (Exception e) {
+                ndefInfo = new StringBuilder("error:" + e.getMessage());
+            } finally {
+                try {
+                    ndef.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        Log.e(TAG, "DIAG NFC tag UID=" + uid + " tech=[" + tech.toString().trim() + "] ndef=" + ndefInfo);
+    }
+
+    private static String bytesToHex(byte[] data) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : data) {
+            sb.append(String.format("%02X", b));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * A normal launcher start is always allowed.
+     * <ul>
+     *     <li>A start from an NDEF tag is allowed when it carries our own URI
+     *     ({@link #NFC_TRIGGER_URI}) - the scheme is unique to this app.</li>
+     *     <li>A start from a bare tech tag is allowed only when the UID matches
+     *     {@link #TARGET_NFC_UID}.</li>
+     * </ul>
+     */
+    private boolean isNfcLaunchAllowed(Intent intent) {
+        if (intent == null) {
+            return true;
+        }
+        String action = intent.getAction();
+
+        if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
+            Uri data = intent.getData();
+            boolean match = data != null && NFC_TRIGGER_URI.equals(data.toString());
+            Log.d(TAG, "NFC NDEF launch uri=" + data + " match=" + match);
+            return match;
+        }
+
+        if (NfcAdapter.ACTION_TECH_DISCOVERED.equals(action)
+                || NfcAdapter.ACTION_TAG_DISCOVERED.equals(action)) {
+            Tag tag = tagFromIntent(intent);
+            if (tag == null) {
+                return false;
+            }
+            String uid = bytesToHex(tag.getId());
+            boolean match = TARGET_NFC_UID.equalsIgnoreCase(uid);
+            Log.d(TAG, "NFC tech launch UID=" + uid + " match=" + match);
+            return match;
+        }
+        return true;
+    }
+
+    /** Reads the discovered tag from an NFC intent across API levels. */
+    @SuppressWarnings("deprecation")
+    private static Tag tagFromIntent(Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag.class);
+        }
+        return intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
+    }
+
+    @Override
+    protected void onNewIntent(@NonNull Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String action = intent.getAction();
+        if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
+            Log.d(TAG, "NFC onNewIntent NDEF uri=" + intent.getData());
+        } else if (NfcAdapter.ACTION_TECH_DISCOVERED.equals(action)) {
+            Tag tag = tagFromIntent(intent);
+            String uid = tag == null ? "?" : bytesToHex(tag.getId());
+            Log.d(TAG, "NFC onNewIntent tech UID=" + uid
+                    + " match=" + TARGET_NFC_UID.equalsIgnoreCase(uid));
+        }
     }
 
     @Override
