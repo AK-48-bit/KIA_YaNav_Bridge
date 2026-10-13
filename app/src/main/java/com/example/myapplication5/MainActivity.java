@@ -101,6 +101,10 @@ public class MainActivity extends AppCompatActivity {
     private volatile boolean btLostNotified = false;   // avoid duplicate "lost" handling
     private Thread btMonitorThread;
     private static final long BT_CHECK_INTERVAL_MS = 3000; // liveness/retry period
+    // If a running session cannot find the HC-05 controller for this long, the
+    // app shuts itself down completely (saves battery / stops screen capture).
+    private static final long BT_ABSENT_TIMEOUT_MS = 30 * 60 * 1000L;
+    private long btAbsentSince = 0;  // ms timestamp when HC-05 went missing (watchdog thread only)
     private final Object btLock = new Object();
     private TextView btStatusText;   // "HC-05: подключён / нет связи" indicator
     private View btStatusDot;
@@ -1123,6 +1127,7 @@ public class MainActivity extends AppCompatActivity {
                     if (!btConnected) {
                         if (tryConnectBt()) {
                             btConnected = true;
+                            btAbsentSince = 0;
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
@@ -1140,6 +1145,29 @@ public class MainActivity extends AppCompatActivity {
                             }
                         });
                     }
+
+                    // While a session is running but the controller is absent, count how
+                    // long it has been missing and give up after BT_ABSENT_TIMEOUT_MS.
+                    if (sessionActive && !btConnected) {
+                        long now = System.currentTimeMillis();
+                        if (btAbsentSince == 0) {
+                            btAbsentSince = now;
+                            Log.w(TAG, "HC-05 отсутствует. Автовыключение через "
+                                    + (BT_ABSENT_TIMEOUT_MS / 60000) + " мин.");
+                        } else if (now - btAbsentSince >= BT_ABSENT_TIMEOUT_MS) {
+                            btMonitorRunning = false;
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    onBtAbsentTimeout();
+                                }
+                            });
+                            break;
+                        }
+                    } else {
+                        btAbsentSince = 0;
+                    }
+
                     try {
                         Thread.sleep(BT_CHECK_INTERVAL_MS);
                     } catch (InterruptedException e) {
@@ -1237,6 +1265,35 @@ public class MainActivity extends AppCompatActivity {
             resumeCapture();
             Toast.makeText(getBaseContext(), "HC-05 подключён. Продолжаю работу.", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    /**
+     * UI thread: a running session could not find HC-05 for {@link #BT_ABSENT_TIMEOUT_MS}.
+     * Shut the whole app down.
+     */
+    private void onBtAbsentTimeout() {
+        Log.e(TAG, "HC-05 не найден " + (BT_ABSENT_TIMEOUT_MS / 60000) + " мин. Завершаю приложение.");
+        Toast.makeText(getBaseContext(),
+                "HC-05 не найден. Приложение выключается.", Toast.LENGTH_LONG).show();
+        shutdownApp();
+    }
+
+    /** Full shutdown: stop capture, service, socket and finish the activity. */
+    private void shutdownApp() {
+        sessionActive = false;
+        btConnected = false;
+        stopBtMonitor();
+        pauseCapture();
+        stopService(serviceIntent);
+        destroyMediaProjection();
+        closeBtSocket();
+        if (tessBaseApi != null) {
+            tessBaseApi.end();
+            tessBaseApi = null;
+        }
+        finishAndRemoveTask();
+        // Terminate the process as well so nothing keeps running in the background.
+        android.os.Process.killProcess(android.os.Process.myPid());
     }
 
     /** Called from a failed write - the controller is gone. */
