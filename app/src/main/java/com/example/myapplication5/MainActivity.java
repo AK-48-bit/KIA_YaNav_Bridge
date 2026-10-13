@@ -104,6 +104,7 @@ public class MainActivity extends AppCompatActivity {
     private final Object btLock = new Object();
     private TextView btStatusText;   // "HC-05: подключён / нет связи" indicator
     private View btStatusDot;
+    private int frameCount = 0;      // DIAG: processed frames counter
 
     TessBaseAPI tessBaseApi;   // будем использовать для распознавания текста
     Mat temple_arrow_right;    // шаблоны, по которым будем искать объекты
@@ -317,6 +318,10 @@ public class MainActivity extends AppCompatActivity {
             }
             imageReader.setOnImageAvailableListener(reader -> {
                 Bitmap bitmap = null;
+                frameCount++;
+                if (frameCount % 30 == 0) {
+                    Log.d(TAG, "DIAG frame " + frameCount + " btConnected=" + btConnected);
+                }
                 try (Image image = imageReader.acquireLatestImage()) {
                     final Image.Plane[] planes = image.getPlanes();
                     final ByteBuffer buffer = planes[0].getBuffer();
@@ -334,7 +339,9 @@ public class MainActivity extends AppCompatActivity {
                     // Crop the image
                     int height = img.rows();
                     int width = img.cols();
-                    Log.e(TAG, "width " + String.valueOf(width) + " - " + height);
+                    if (frameCount % 60 == 0) {
+                        Log.d(TAG, "DIAG width " + width + " - " + height);
+                    }
                     Mat croppedImg = img.submat(80, height / 6, 0, width);
 
                     // Resize the image
@@ -366,37 +373,34 @@ public class MainActivity extends AppCompatActivity {
                         Mat circles = new Mat();
                         Imgproc.HoughCircles(only_RED, circles, Imgproc.CV_HOUGH_GRADIENT, 3, 100, 20, 100);
 
-                        //System.out.println("Out_radius    start");
-                        Point center = null;
-                        for (int i = 0; i < circles.cols(); i++) {
-                            double[] circle = circles.get(0, i);
-                            center = new Point(Math.round(circle[0]), Math.round(circle[1]));
-                            int radius = (int) Math.round(circle[2]);
-                        }
-                        //System.out.println("Out_radius    " + center);
-                        // define region of interest
-                        int x = (int) Math.round(circles.get(0, 0)[0]);
-                        int y = (int) Math.round(circles.get(0, 0)[1]);
-                        int r = (int) Math.round(circles.get(0, 0)[2]);
-                        Rect roi2 = new Rect(x - r + 10, y - r / 2, 2 * r - 20, r);
-                        //System.out.println("Out_reader" + roi2);
-                        Mat roi_img = new Mat(croppedImg_rSide, roi2);
+                        // The circle detection may legitimately find nothing. In that case
+                        // circles is empty and circles.get(0,0) is null, so guard against it
+                        // instead of throwing a NullPointerException that aborts the frame.
+                        if (circles.cols() > 0) {
+                            // define region of interest
+                            int x = (int) Math.round(circles.get(0, 0)[0]);
+                            int y = (int) Math.round(circles.get(0, 0)[1]);
+                            int r = (int) Math.round(circles.get(0, 0)[2]);
+                            Rect roi2 = new Rect(x - r + 10, y - r / 2, 2 * r - 20, r);
+                            //System.out.println("Out_reader" + roi2);
+                            Mat roi_img = new Mat(croppedImg_rSide, roi2);
 
 
-                        // convert to grayscale
-                        Mat gray_roi = new Mat();
-                        Imgproc.cvtColor(roi_img, gray_roi, Imgproc.COLOR_RGB2GRAY);
+                            // convert to grayscale
+                            Mat gray_roi = new Mat();
+                            Imgproc.cvtColor(roi_img, gray_roi, Imgproc.COLOR_RGB2GRAY);
 
-                        // convert to black and white
-                        Mat binary_roi = new Mat();
-                        threshold(gray_roi, binary_roi, 127, 255, THRESH_BINARY);
+                            // convert to black and white
+                            Mat binary_roi = new Mat();
+                            threshold(gray_roi, binary_roi, 127, 255, THRESH_BINARY);
 
-                        // Create the TextRecognizer
-                        //System.out.println("Out_start_TextRecognizer_speed");
-                        int speed = get_speed(binary_roi);
-                        //System.out.println("Out_тессер                  " + speed);
-                        if (speed > 10) {
-                            send_speedToController(speed);
+                            // Create the TextRecognizer
+                            //System.out.println("Out_start_TextRecognizer_speed");
+                            int speed = get_speed(binary_roi);
+                            //System.out.println("Out_тессер                  " + speed);
+                            if (speed > 10) {
+                                send_speedToController(speed);
+                            }
                         }
                     }
 
@@ -455,33 +459,43 @@ public class MainActivity extends AppCompatActivity {
                         if (rect_height > 100) {
                             rect_height = 5 + rect_height / 2;
                         }
-                        Mat roi = croppedImg_lSide.submat(rect_y + 10, rect_y + rect_height, rect_x + 10, rect_x + rect_width - 10);
+                        // When no blue turn rectangle is found on the frame the ROI bounds would
+                        // be invalid; skip the turns branch instead of throwing a CvException that
+                        // aborts the whole frame (and any pending transmission).
+                        boolean turnsRoiValid = rect_width > 20 && rect_height > 10
+                                && (rect_x + rect_width - 10) > (rect_x + 10)
+                                && (rect_y + rect_height) <= croppedImg_lSide.rows()
+                                && (rect_x + rect_width - 10) <= croppedImg_lSide.cols();
+                        if (turnsRoiValid) {
+                            Mat roi = croppedImg_lSide.submat(rect_y + 10, rect_y + rect_height, rect_x + 10, rect_x + rect_width - 10);
 
+                            // __________ переводим в серое _________________
+                            Imgproc.cvtColor(roi, roi, Imgproc.COLOR_RGB2GRAY);
+                            Mat binary_roi2 = new Mat();
+                            threshold(roi, binary_roi2, 220, 255, THRESH_BINARY);
+                            Core.bitwise_not(binary_roi2, binary_roi2);
+                            Imgproc.blur(binary_roi2, binary_roi2, new Size(5, 5));
+                            if (roi.cols() > 50) {
+                                Mat roi2_cropped = binary_roi2.submat(0, roi.rows(), 50, roi.cols());
 
-                        // __________ переводим в серое _________________
-                        Imgproc.cvtColor(roi, roi, Imgproc.COLOR_RGB2GRAY);
-                        Mat binary_roi2 = new Mat();
-                        threshold(roi, binary_roi2, 220, 255, THRESH_BINARY);
-                        Core.bitwise_not(binary_roi2, binary_roi2);
-                        Imgproc.blur(binary_roi2, binary_roi2, new Size(5, 5));
-                        Mat roi2_cropped = binary_roi2.submat(0, roi.rows(), 50, roi.cols());
+                                //------------------- get distance turn --------------------------------------------------
+                                Object[] array;
+                                array = get_turn_dist(roi2_cropped);
+                                int dist_H = (int) array[0];
+                                int dist_L = (int) array[1];
+                                int dist_type = (int) array[2];
+                                int decimal = (int) array[3];
+                                System.out.println("Out_decimal     " + decimal);
 
-                        //------------------- get distance turn --------------------------------------------------
-                        Object[] array;
-                        array = get_turn_dist(roi2_cropped);
-                        int dist_H = (int) array[0];
-                        int dist_L = (int) array[1];
-                        int dist_type = (int) array[2];
-                        int decimal = (int) array[3];
-                        System.out.println("Out_decimal     " +    decimal);
-
-                        // __________ get turn type --------------------------------------------------- _________________
-                        Mat roi_leftSide;
-                        roi_leftSide = binary_roi2.submat(0, binary_roi2.rows(), 0, binary_roi2.cols() / 3);
-                        int turns_type = get_turn_type(roi_leftSide);
-                        //---------------- send data to controller ------------------------------------------------------
-                        if (dist_L > 0) {
-                            send_turnsToController (turns_type, dist_H, dist_L, dist_type, decimal);
+                                // __________ get turn type --------------------------------------------------- _________________
+                                Mat roi_leftSide;
+                                roi_leftSide = binary_roi2.submat(0, binary_roi2.rows(), 0, binary_roi2.cols() / 3);
+                                int turns_type = get_turn_type(roi_leftSide);
+                                //---------------- send data to controller ------------------------------------------------------
+                                if (dist_L > 0) {
+                                    send_turnsToController(turns_type, dist_H, dist_L, dist_type, decimal);
+                                }
+                            }
                         }
                     }
 
@@ -578,6 +592,7 @@ public class MainActivity extends AppCompatActivity {
 
                 } catch (Exception e) {
                     e.printStackTrace();
+                    Log.e(TAG, "DIAG processing exception", e);
                 } finally {
                     if (bitmap != null)
                         bitmap.recycle();
@@ -668,7 +683,13 @@ public class MainActivity extends AppCompatActivity {
         //System.out.println("Out_distance_sssss            " + final_output);
         final_output = final_output.replace(",", ".");
         final_output = final_output.replaceAll("[^0-9.,]", "");  //оставляем только числа в строке
-        float distance = Float.parseFloat(final_output);
+        // OCR may leave nothing to parse (e.g. no distance digits on screen).
+        float distance = 0;
+        try {
+            distance = Float.parseFloat(final_output);
+        } catch (NumberFormatException e) {
+            distance = 0;
+        }
         //System.out.println("Out_distance_            " + distance);
         if (distance > 9999) {distance = 0;};   //remove big numbers
         //System.out.println("Out_tes_turns_distance  " + distance);
@@ -721,12 +742,20 @@ public class MainActivity extends AppCompatActivity {
         final_output1 = final_output1.replace("-", "");
         final_output1 = final_output1.replace(",", "");
         final_output1 = final_output1.replace(".", "");
+        // OCR may return nothing usable; bail out instead of crashing the frame.
+        if (final_output1.isEmpty()) {
+            return 0;
+        }
         if (final_output1.charAt(final_output1.length() - 1) == '1') {
             final_output1 = final_output1.substring(0, final_output1.length() - 1);
         }
         //System.out.println("Out_тессер  raw                " + final_output1);
         int speed = 0;
-        speed = Integer.parseInt(final_output1);
+        try {
+            speed = Integer.parseInt(final_output1);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
         if (speed > 130 & speed < 200) {
             speed = speed - 100;
         }
@@ -844,7 +873,13 @@ public class MainActivity extends AppCompatActivity {
         //System.out.println("Out_distance_sssss            " + final_output);
         final_output = final_output.replace(",", ".");
         final_output = final_output.replaceAll("[^0-9.,]", "");  //оставляем только числа в строке
-        float distance = Float.parseFloat(final_output);
+        // OCR may leave nothing to parse (e.g. no distance digits on screen).
+        float distance = 0;
+        try {
+            distance = Float.parseFloat(final_output);
+        } catch (NumberFormatException e) {
+            distance = 0;
+        }
         //System.out.println("Out_distance_            " + distance);
         if (distance > 9999) {distance = 0;};   //remove big numbers
         //System.out.println("Out_tes_turns_distance  " + distance);
@@ -1056,6 +1091,7 @@ public class MainActivity extends AppCompatActivity {
       private class MediaProjectionCallback extends MediaProjection.Callback {
         @Override
         public void onStop() {
+            Log.w(TAG, "DIAG projection.onStop (system stopped the projection)");
             if (mToggleButton.isChecked()) {
                 mToggleButton.setChecked(false);
 
@@ -1137,7 +1173,7 @@ public class MainActivity extends AppCompatActivity {
                 btAdapter.cancelDiscovery();
                 btSocket.connect();
                 outStream = btSocket.getOutputStream();
-                Log.d(TAG, "...HC-05 подключён...");
+                Log.d(TAG, "DIAG tryConnectBt: connected, outStream=" + (outStream != null));
                 return true;
             } catch (Exception e) {
                 Log.e(TAG, "...HC-05 connect failed: " + e.getMessage());
@@ -1221,18 +1257,22 @@ public class MainActivity extends AppCompatActivity {
         if (mVirtualDisplayImg != null) {
             mVirtualDisplayImg.release();
             mVirtualDisplayImg = null;
+            Log.d(TAG, "DIAG pauseCapture: VirtualDisplay released");
         }
     }
 
     /** Re-creates the VirtualDisplay from the still-valid MediaProjection. */
     private void resumeCapture() {
         if (mMediaProjection == null || mVirtualDisplayImg != null) {
+            Log.d(TAG, "DIAG resumeCapture skipped: projection=" + (mMediaProjection != null)
+                    + " display=" + (mVirtualDisplayImg != null));
             return;
         }
         mVirtualDisplayImg = mMediaProjection.createVirtualDisplay("MainActivity",
                 DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_DPI,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader.getSurface(), null /*Callbacks*/, null /*Handler*/);
+        Log.d(TAG, "DIAG resumeCapture: VirtualDisplay created = " + (mVirtualDisplayImg != null));
     }
 
     /** Full stop of the capture session (user pressed STOP or projection ended). */
