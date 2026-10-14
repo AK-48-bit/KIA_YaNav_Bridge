@@ -18,7 +18,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // One flavor per installable variant. All three share the same code base
+    // One flavor per installable variant. Both share the same code base
     // and only differ in applicationId, app name and launcher icon.
     flavorDimensions += "version"
     productFlavors {
@@ -26,12 +26,6 @@ android {
             dimension = "version"
             manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
             resValue("string", "app_name", "KIA Sorento bridge")
-        }
-        create("kia2") {
-            dimension = "version"
-            applicationIdSuffix = ".kia2"
-            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_kia2"
-            resValue("string", "app_name", "KIA Sorento bridge 2")
         }
         create("kia3") {
             dimension = "version"
