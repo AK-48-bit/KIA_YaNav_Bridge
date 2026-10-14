@@ -275,8 +275,7 @@ public class MainActivity extends AppCompatActivity {
                     NfcAdapter.FLAG_READER_NFC_A
                             | NfcAdapter.FLAG_READER_NFC_B
                             | NfcAdapter.FLAG_READER_NFC_F
-                            | NfcAdapter.FLAG_READER_NFC_V
-                            | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+                            | NfcAdapter.FLAG_READER_NFC_V,
                     options);
             Log.d(TAG, "NFC: reader mode enabled");
         }
@@ -314,8 +313,12 @@ public class MainActivity extends AppCompatActivity {
                         .append(" records=").append(msg == null ? 0 : msg.getRecords().length);
                 if (msg != null) {
                     for (NdefRecord r : msg.getRecords()) {
-                        ndefInfo.append(" [tnf=").append(r.getTnf())
-                                .append(" payload=").append(bytesToHex(r.getPayload()))
+                        ndefInfo.append(" [tnf=").append(r.getTnf());
+                        Uri uri = r.toUri();
+                        if (uri != null) {
+                            ndefInfo.append(" URI=").append(uri);
+                        }
+                        ndefInfo.append(" payload=").append(bytesToHex(r.getPayload()))
                                 .append("]");
                     }
                 }
