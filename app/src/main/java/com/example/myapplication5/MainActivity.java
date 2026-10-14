@@ -27,7 +27,6 @@ import android.nfc.NdefRecord;
 import android.nfc.NfcAdapter;
 import android.nfc.Tag;
 import android.nfc.tech.Ndef;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
@@ -119,10 +118,14 @@ public class MainActivity extends AppCompatActivity {
     // ++++++++++++++++++++++++++  NFC  ++++++++++++++++++++++++++++++++++++++++
     // UID of the transport card kept in the car holder. Only this tag will
     // launch the app; any other MIFARE tag is ignored.
-    private static final String TARGET_NFC_UID = "041B889A201D90";
-    // NDEF URI to write on a writable tag (NTAG213). Must match the intent
+    static final String TARGET_NFC_UID = "041B889A201D90";
+    // NDEF URI to write on a writable tag (NTAG215). Must match the intent
     // filter declared for NDEF_DISCOVERED in AndroidManifest.xml.
-    private static final String NFC_TRIGGER_URI = "kia-bridge://go";
+    static final String NFC_TRIGGER_URI = "kia-bridge://go";
+    // Set by NfcLaunchActivity when the app is opened by the vehicle tag.
+    static final String EXTRA_AUTO_START = "extra_auto_start";
+    // Mirrors sessionStarting/sessionActive for NfcLaunchActivity (same process).
+    private static volatile boolean sSessionBusy = false;
     private NfcAdapter nfcAdapter;
     private boolean launchedFromNfc = false;  // opened by tapping the car-holder tag
     private boolean autoStartPending = false; // NFC auto-start is waiting for onResume
@@ -165,14 +168,9 @@ public class MainActivity extends AppCompatActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // When started by tapping a tag, continue only for the configured card.
-        if (!isNfcLaunchAllowed(getIntent())) {
-            Log.d(TAG, "NFC: чужая метка - приложение не открываем");
-            finish();
-            return;
-        }
-        // Remember whether we were opened by the vehicle tag (auto-start capture).
-        launchedFromNfc = isNfcTriggered(getIntent());
+        // NfcLaunchActivity validates the tag and asks for an auto-start.
+        launchedFromNfc = getIntent() != null
+                && getIntent().getBooleanExtra(EXTRA_AUTO_START, false);
         if (launchedFromNfc) {
             lastNfcTriggerAt = System.currentTimeMillis();
         }
@@ -249,6 +247,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         sessionStarting = true;
+        sSessionBusy = true;
         if (!mToggleButton.isChecked()) {
             mToggleButton.setChecked(true);
         }
@@ -271,6 +270,7 @@ public class MainActivity extends AppCompatActivity {
                 Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             // The session cannot start without storage access; allow a later retry.
             sessionStarting = false;
+            sSessionBusy = false;
             if (ActivityCompat.shouldShowRequestPermissionRationale
                     (this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
                 mToggleButton.setChecked(false);
@@ -308,7 +308,7 @@ public class MainActivity extends AppCompatActivity {
                     new NfcAdapter.ReaderCallback() {
                         @Override
                         public void onTagDiscovered(Tag tag) {
-                            logNfcTag(tag);
+                            handleNfcTag(tag);
                         }
                     },
                     NfcAdapter.FLAG_READER_NFC_A
@@ -331,9 +331,87 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         isForeground = false;
-        if (nfcAdapter != null) {
-            nfcAdapter.disableReaderMode(this);
+        // NOTE: reader mode is intentionally NOT disabled here. While it stays
+        // enabled the tag is delivered to onTagDiscovered instead of being
+        // re-dispatched as an NDEF intent. That re-dispatch used to relaunch this
+        // activity on top of the screen-capture consent dialog and dismiss it.
+    }
+
+    /** Reader-mode entry point: logs the tag and reacts to the configured one. */
+    private void handleNfcTag(Tag tag) {
+        logNfcTag(tag);
+        if (isTriggerTag(tag)) {
+            onNfcTriggerDetected();
+        } else {
+            Log.d(TAG, "NFC: не наша метка (reader mode) - игнорируем");
         }
+    }
+
+    /** True when the tag is either our NTAG (trigger URI) or the transport card. */
+    private boolean isTriggerTag(Tag tag) {
+        String uid = bytesToHex(tag.getId());
+        if (TARGET_NFC_UID.equalsIgnoreCase(uid)) {
+            return true;
+        }
+        Ndef ndef = Ndef.get(tag);
+        if (ndef != null) {
+            try {
+                ndef.connect();
+                NdefMessage msg = ndef.getNdefMessage();
+                if (msg != null) {
+                    for (NdefRecord r : msg.getRecords()) {
+                        Uri uri = r.toUri();
+                        if (uri != null && NFC_TRIGGER_URI.equals(uri.toString())) {
+                            return true;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            } finally {
+                try {
+                    ndef.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Single place that decides what to do when the vehicle tag is seen. Shared
+     * by the reader-mode callback and by the NDEF intent path.
+     */
+    private void onNfcTriggerDetected() {
+        long now = System.currentTimeMillis();
+        boolean duplicate = (now - lastNfcTriggerAt) < NFC_DEBOUNCE_MS;
+        lastNfcTriggerAt = now;
+
+        if (sessionStarting) {
+            // The capture-consent dialog is on screen - leave it alone.
+            Log.d(TAG, "NFC: запрос разрешения уже показан, касание игнорируется");
+            return;
+        }
+
+        if (sessionActive) {
+            // The session is already running - never steal focus from whatever is
+            // on screen (for example the navigator started by auto-start).
+            Log.d(TAG, "NFC: сессия уже идёт, касание игнорируется");
+            if (!isForeground) {
+                moveTaskToBack(true);
+            }
+            return;
+        }
+
+        if (duplicate) {
+            Log.d(TAG, "NFC: повторное срабатывание, игнорируем");
+            if (!isForeground) {
+                moveTaskToBack(true);
+            }
+            return;
+        }
+
+        Log.d(TAG, "NFC: автозапуск сессии");
+        beginSession();
     }
 
     /** DIAG: logs the UID, technologies and NDEF details of a tapped tag. */
@@ -390,118 +468,20 @@ public class MainActivity extends AppCompatActivity {
         return sb.toString();
     }
 
-    /**
-     * A normal launcher start is always allowed.
-     * <ul>
-     *     <li>A start from an NDEF tag is allowed when it carries our own URI
-     *     ({@link #NFC_TRIGGER_URI}) - the scheme is unique to this app.</li>
-     *     <li>A start from a bare tech tag is allowed only when the UID matches
-     *     {@link #TARGET_NFC_UID}.</li>
-     * </ul>
-     */
-    private boolean isNfcLaunchAllowed(Intent intent) {
-        if (intent == null) {
-            return true;
-        }
-        String action = intent.getAction();
-
-        if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
-            Uri data = intent.getData();
-            boolean match = data != null && NFC_TRIGGER_URI.equals(data.toString());
-            Log.d(TAG, "NFC NDEF launch uri=" + data + " match=" + match);
-            return match;
-        }
-
-        if (NfcAdapter.ACTION_TECH_DISCOVERED.equals(action)
-                || NfcAdapter.ACTION_TAG_DISCOVERED.equals(action)) {
-            Tag tag = tagFromIntent(intent);
-            if (tag == null) {
-                return false;
-            }
-            String uid = bytesToHex(tag.getId());
-            boolean match = TARGET_NFC_UID.equalsIgnoreCase(uid);
-            Log.d(TAG, "NFC tech launch UID=" + uid + " match=" + match);
-            return match;
-        }
-        return true;
-    }
-
-    /** Reads the discovered tag from an NFC intent across API levels. */
-    @SuppressWarnings("deprecation")
-    private static Tag tagFromIntent(Intent intent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag.class);
-        }
-        return intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
+    /** Used by NfcLaunchActivity: a session exists or is being started. */
+    static boolean isSessionBusy() {
+        return sSessionBusy;
     }
 
     @Override
     protected void onNewIntent(@NonNull Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        String action = intent.getAction();
-        if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
-            Log.d(TAG, "NFC onNewIntent NDEF uri=" + intent.getData());
-        } else if (NfcAdapter.ACTION_TECH_DISCOVERED.equals(action)) {
-            Tag tag = tagFromIntent(intent);
-            String uid = tag == null ? "?" : bytesToHex(tag.getId());
-            Log.d(TAG, "NFC onNewIntent tech UID=" + uid
-                    + " match=" + TARGET_NFC_UID.equalsIgnoreCase(uid));
+        // NfcLaunchActivity validated the tag already; it only asks for a start.
+        if (intent.getBooleanExtra(EXTRA_AUTO_START, false)) {
+            Log.d(TAG, "NFC onNewIntent: EXTRA_AUTO_START");
+            onNfcTriggerDetected();
         }
-
-        // Tag tapped while the app was already running.
-        if (!isNfcTriggered(intent) || mToggleButton == null) {
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        boolean duplicate = (now - lastNfcTriggerAt) < NFC_DEBOUNCE_MS;
-        lastNfcTriggerAt = now;
-
-        if (sessionStarting) {
-            // The capture-consent dialog is on screen - leave it alone.
-            Log.d(TAG, "NFC: запрос разрешения уже показан, касание игнорируется");
-            return;
-        }
-
-        if (sessionActive) {
-            // The session is already running - do not steal focus from whatever
-            // is on screen (for example the navigator we just launched).
-            Log.d(TAG, "NFC: сессия уже идёт, касание игнорируется");
-            if (!isForeground) {
-                moveTaskToBack(true);
-            }
-            return;
-        }
-
-        if (duplicate) {
-            // The same tag was read again within the debounce window - ignore it.
-            Log.d(TAG, "NFC: повторное срабатывание, игнорируем");
-            if (!isForeground) {
-                moveTaskToBack(true);
-            }
-            return;
-        }
-
-        Log.d(TAG, "NFC: автозапуск сессии (onNewIntent)");
-        beginSession();
-    }
-
-    /** True when the given intent was produced by tapping the configured NFC tag. */
-    private boolean isNfcTriggered(Intent intent) {
-        if (intent == null) {
-            return false;
-        }
-        String action = intent.getAction();
-        if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
-            Uri data = intent.getData();
-            return data != null && NFC_TRIGGER_URI.equals(data.toString());
-        }
-        if (NfcAdapter.ACTION_TECH_DISCOVERED.equals(action)) {
-            Tag tag = tagFromIntent(intent);
-            return tag != null && TARGET_NFC_UID.equalsIgnoreCase(bytesToHex(tag.getId()));
-        }
-        return false;
     }
 
     @Override
@@ -516,6 +496,7 @@ public class MainActivity extends AppCompatActivity {
                     "Screen Cast Permission Denied", Toast.LENGTH_SHORT).show();
             mToggleButton.setChecked(false);
             sessionStarting = false;
+            sSessionBusy = false;
 
             return;
         }
@@ -1558,6 +1539,7 @@ public class MainActivity extends AppCompatActivity {
     /** Full shutdown: stop capture, service, socket and finish the activity. */
     private void shutdownApp() {
         sessionActive = false;
+        sSessionBusy = false;
         btConnected = false;
         stopBtMonitor();
         pauseCapture();
@@ -1613,6 +1595,7 @@ public class MainActivity extends AppCompatActivity {
     private void stopScreenSharing() {
         sessionActive = false;
         sessionStarting = false;
+        sSessionBusy = false;
         pauseCapture();
         stopService(serviceIntent);
         destroyMediaProjection();
@@ -1625,7 +1608,14 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        if (nfcAdapter != null) {
+            try {
+                nfcAdapter.disableReaderMode(this);
+            } catch (Exception ignored) {
+            }
+        }
         sessionActive = false;
+        sSessionBusy = false;
         btConnected = false;
         stopBtMonitor();
         stopService(serviceIntent);

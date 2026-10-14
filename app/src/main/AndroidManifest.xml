@@ -41,11 +41,26 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
 
-            <!-- Primary trigger: a writable NFC tag (e.g. NTAG213) carrying our
-                 own NDEF URI "kia-bridge://go". NDEF is dispatched before tech
-                 discovery and nobody else claims this scheme, so the app starts
-                 directly with no app chooser. -->
+        <!-- Invisible NFC entry point. Declared separately from MainActivity so
+             that a repeated tag dispatch never brings the running activity to
+             the front (which used to dismiss the screen-capture consent dialog).
+
+             Primary trigger: a writable tag (e.g. NTAG215) carrying our own NDEF
+             URI "kia-bridge://go". Nobody else claims this scheme, so the app
+             starts directly with no app chooser.
+
+             Fallback: MIFARE Classic / NfcA tags (e.g. a transport card). The
+             UID is verified in code. Other apps (HUAWEI Wallet, Yandex Metro)
+             also handle this tech, so Android may show an app chooser. -->
+        <activity
+            android:name=".NfcLaunchActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.nfc.action.NDEF_DISCOVERED" />
 
@@ -55,11 +70,6 @@
                     android:host="go"
                     android:scheme="kia-bridge" />
             </intent-filter>
-
-            <!-- Fallback: any MIFARE Classic / NfcA tag (e.g. a transport card).
-                 The UID is verified in code, so only the configured card reacts.
-                 Other apps (HUAWEI Wallet, Yandex Metro) also handle this tech,
-                 so Android may show an app chooser for such tags. -->
             <intent-filter>
                 <action android:name="android.nfc.action.TECH_DISCOVERED" />
 
