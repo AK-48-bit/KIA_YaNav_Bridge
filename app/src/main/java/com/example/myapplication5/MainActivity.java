@@ -126,6 +126,12 @@ public class MainActivity extends AppCompatActivity {
     private NfcAdapter nfcAdapter;
     private boolean launchedFromNfc = false;  // opened by tapping the car-holder tag
     private boolean autoStartPending = false; // NFC auto-start is waiting for onResume
+    private boolean sessionStarting = false;  // a capture-consent request is in flight
+    private boolean isForeground = false;     // activity is currently resumed
+    // A car-holder tag stays in the field and can be re-detected several times;
+    // repeats within this window are ignored.
+    private static final long NFC_DEBOUNCE_MS = 10000;
+    private static long lastNfcTriggerAt = 0;
 
     TessBaseAPI tessBaseApi;   // будем использовать для распознавания текста
     Mat temple_arrow_right;    // шаблоны, по которым будем искать объекты
@@ -167,6 +173,9 @@ public class MainActivity extends AppCompatActivity {
         }
         // Remember whether we were opened by the vehicle tag (auto-start capture).
         launchedFromNfc = isNfcTriggered(getIntent());
+        if (launchedFromNfc) {
+            lastNfcTriggerAt = System.currentTimeMillis();
+        }
 
         //+++++++++++++++++ проверяем доступность BT адаптера +++++++++++++++++++++++++++++++++++++++++++++++++++++
         btAdapter = BluetoothAdapter.getDefaultAdapter();  
@@ -232,6 +241,14 @@ public class MainActivity extends AppCompatActivity {
      * button and by the NFC auto-start.
      */
     private void beginSession() {
+        // Guard against re-entry: while the consent dialog is on screen the
+        // session is neither active nor stopped, so repeated NFC triggers (the
+        // tag stays in the field) would otherwise start it over and over.
+        if (sessionStarting || sessionActive) {
+            Log.d(TAG, "beginSession(): сессия уже запущена или запрашивается - пропускаем");
+            return;
+        }
+        sessionStarting = true;
         if (!mToggleButton.isChecked()) {
             mToggleButton.setChecked(true);
         }
@@ -252,6 +269,8 @@ public class MainActivity extends AppCompatActivity {
         ContextCompat.startForegroundService(this, serviceIntent);
         if (ContextCompat.checkSelfPermission(this,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            // The session cannot start without storage access; allow a later retry.
+            sessionStarting = false;
             if (ActivityCompat.shouldShowRequestPermissionRationale
                     (this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
                 mToggleButton.setChecked(false);
@@ -281,6 +300,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        isForeground = true;
         if (nfcAdapter != null) {
             Bundle options = new Bundle();
             options.putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250);
@@ -310,6 +330,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        isForeground = false;
         if (nfcAdapter != null) {
             nfcAdapter.disableReaderMode(this);
         }
@@ -428,12 +449,42 @@ public class MainActivity extends AppCompatActivity {
                     + " match=" + TARGET_NFC_UID.equalsIgnoreCase(uid));
         }
 
-        // The app was already open and the tag was tapped again: (re)start the
-        // session unless it is already running.
-        if (isNfcTriggered(intent) && !sessionActive && mToggleButton != null) {
-            Log.d(TAG, "NFC: автозапуск сессии (onNewIntent)");
-            beginSession();
+        // Tag tapped while the app was already running.
+        if (!isNfcTriggered(intent) || mToggleButton == null) {
+            return;
         }
+
+        long now = System.currentTimeMillis();
+        boolean duplicate = (now - lastNfcTriggerAt) < NFC_DEBOUNCE_MS;
+        lastNfcTriggerAt = now;
+
+        if (sessionStarting) {
+            // The capture-consent dialog is on screen - leave it alone.
+            Log.d(TAG, "NFC: запрос разрешения уже показан, касание игнорируется");
+            return;
+        }
+
+        if (sessionActive) {
+            // The session is already running - do not steal focus from whatever
+            // is on screen (for example the navigator we just launched).
+            Log.d(TAG, "NFC: сессия уже идёт, касание игнорируется");
+            if (!isForeground) {
+                moveTaskToBack(true);
+            }
+            return;
+        }
+
+        if (duplicate) {
+            // The same tag was read again within the debounce window - ignore it.
+            Log.d(TAG, "NFC: повторное срабатывание, игнорируем");
+            if (!isForeground) {
+                moveTaskToBack(true);
+            }
+            return;
+        }
+
+        Log.d(TAG, "NFC: автозапуск сессии (onNewIntent)");
+        beginSession();
     }
 
     /** True when the given intent was produced by tapping the configured NFC tag. */
@@ -464,6 +515,7 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this,
                     "Screen Cast Permission Denied", Toast.LENGTH_SHORT).show();
             mToggleButton.setChecked(false);
+            sessionStarting = false;
 
             return;
         }
@@ -530,6 +582,7 @@ public class MainActivity extends AppCompatActivity {
         // The HC-05 watchdog (started in onCreate) connects to the controller off
         // the UI thread and creates the VirtualDisplay once the link is up.
         sessionActive = true;
+        sessionStarting = false;
         if (btConnected) {
             resumeCapture();
         } else {
@@ -1559,6 +1612,7 @@ public class MainActivity extends AppCompatActivity {
     /** Full stop of the capture session (user pressed STOP or projection ended). */
     private void stopScreenSharing() {
         sessionActive = false;
+        sessionStarting = false;
         pauseCapture();
         stopService(serviceIntent);
         destroyMediaProjection();
