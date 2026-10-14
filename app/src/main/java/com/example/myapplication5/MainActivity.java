@@ -113,7 +113,6 @@ public class MainActivity extends AppCompatActivity {
     private final Object btLock = new Object();
     private TextView btStatusText;   // "HC-05: подключён / нет связи" indicator
     private View btStatusDot;
-    private int frameCount = 0;      // DIAG: processed frames counter
 
     // ++++++++++++++++++++++++++  NFC  ++++++++++++++++++++++++++++++++++++++++
     // UID of the transport card kept in the car holder. Only this tag will
@@ -414,7 +413,7 @@ public class MainActivity extends AppCompatActivity {
         beginSession();
     }
 
-    /** DIAG: logs the UID, technologies and NDEF details of a tapped tag. */
+    /** Logs the UID, technologies and NDEF details of a tapped tag. */
     private void logNfcTag(Tag tag) {
         StringBuilder uid = new StringBuilder();
         for (byte b : tag.getId()) {
@@ -580,10 +579,6 @@ public class MainActivity extends AppCompatActivity {
             }
             imageReader.setOnImageAvailableListener(reader -> {
                 Bitmap bitmap = null;
-                frameCount++;
-                if (frameCount % 30 == 0) {
-                    Log.d(TAG, "DIAG frame " + frameCount + " btConnected=" + btConnected);
-                }
                 try (Image image = imageReader.acquireLatestImage()) {
                     final Image.Plane[] planes = image.getPlanes();
                     final ByteBuffer buffer = planes[0].getBuffer();
@@ -601,9 +596,6 @@ public class MainActivity extends AppCompatActivity {
                     // Crop the image
                     int height = img.rows();
                     int width = img.cols();
-                    if (frameCount % 60 == 0) {
-                        Log.d(TAG, "DIAG width " + width + " - " + height);
-                    }
                     Mat croppedImg = img.submat(80, height / 6, 0, width);
 
                     // Resize the image
@@ -854,7 +846,7 @@ public class MainActivity extends AppCompatActivity {
 
                 } catch (Exception e) {
                     e.printStackTrace();
-                    Log.e(TAG, "DIAG processing exception", e);
+                    Log.e(TAG, "Ошибка обработки кадра", e);
                 } finally {
                     if (bitmap != null)
                         bitmap.recycle();
@@ -1353,7 +1345,7 @@ public class MainActivity extends AppCompatActivity {
       private class MediaProjectionCallback extends MediaProjection.Callback {
         @Override
         public void onStop() {
-            Log.w(TAG, "DIAG projection.onStop (system stopped the projection)");
+            Log.w(TAG, "Проекция остановлена системой");
             if (mToggleButton.isChecked()) {
                 mToggleButton.setChecked(false);
 
@@ -1459,7 +1451,7 @@ public class MainActivity extends AppCompatActivity {
                 btAdapter.cancelDiscovery();
                 btSocket.connect();
                 outStream = btSocket.getOutputStream();
-                Log.d(TAG, "DIAG tryConnectBt: connected, outStream=" + (outStream != null));
+                Log.d(TAG, "HC-05 подключён");
                 return true;
             } catch (Exception e) {
                 Log.e(TAG, "...HC-05 connect failed: " + e.getMessage());
@@ -1573,22 +1565,20 @@ public class MainActivity extends AppCompatActivity {
         if (mVirtualDisplayImg != null) {
             mVirtualDisplayImg.release();
             mVirtualDisplayImg = null;
-            Log.d(TAG, "DIAG pauseCapture: VirtualDisplay released");
+            Log.d(TAG, "Захват экрана приостановлен");
         }
     }
 
     /** Re-creates the VirtualDisplay from the still-valid MediaProjection. */
     private void resumeCapture() {
         if (mMediaProjection == null || mVirtualDisplayImg != null) {
-            Log.d(TAG, "DIAG resumeCapture skipped: projection=" + (mMediaProjection != null)
-                    + " display=" + (mVirtualDisplayImg != null));
             return;
         }
         mVirtualDisplayImg = mMediaProjection.createVirtualDisplay("MainActivity",
                 DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_DPI,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader.getSurface(), null /*Callbacks*/, null /*Handler*/);
-        Log.d(TAG, "DIAG resumeCapture: VirtualDisplay created = " + (mVirtualDisplayImg != null));
+        Log.d(TAG, "Захват экрана возобновлён");
     }
 
     /** Full stop of the capture session (user pressed STOP or projection ended). */

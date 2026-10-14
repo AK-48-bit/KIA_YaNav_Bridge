@@ -1,19 +1,19 @@
+# IDE (Android Studio / IntelliJ) - machine specific, not shared
+.idea/
 *.iml
+
+# Gradle
 .gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
+
+# Build output (app/ has its own .gitignore for /build)
 /build
-/captures
+/sdk/build/
+
+# Native build
 .externalNativeBuild
 .cxx
-local.properties
 
-# Project exclude paths
-/sdk/build/
-/sdk/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/
+# Misc
+/captures
+.DS_Store
+local.properties

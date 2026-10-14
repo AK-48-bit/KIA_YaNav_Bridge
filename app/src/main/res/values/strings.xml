@@ -1,7 +1,5 @@
 <resources>
     <!-- app_name is provided per product flavor via resValue in build.gradle.kts -->
-    <string name="hello_world">Hello world!</string>
-    <string name="action_settings">Settings</string>
     <string name="label_permissions">Please enable Microphone and Storage permissions.</string>
 
     <!-- Main screen -->
