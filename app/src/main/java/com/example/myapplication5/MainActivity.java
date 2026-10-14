@@ -124,6 +124,8 @@ public class MainActivity extends AppCompatActivity {
     // filter declared for NDEF_DISCOVERED in AndroidManifest.xml.
     private static final String NFC_TRIGGER_URI = "kia-bridge://go";
     private NfcAdapter nfcAdapter;
+    private boolean launchedFromNfc = false;  // opened by tapping the car-holder tag
+    private boolean autoStartPending = false; // NFC auto-start is waiting for onResume
 
     TessBaseAPI tessBaseApi;   // будем использовать для распознавания текста
     Mat temple_arrow_right;    // шаблоны, по которым будем искать объекты
@@ -163,6 +165,8 @@ public class MainActivity extends AppCompatActivity {
             finish();
             return;
         }
+        // Remember whether we were opened by the vehicle tag (auto-start capture).
+        launchedFromNfc = isNfcTriggered(getIntent());
 
         //+++++++++++++++++ проверяем доступность BT адаптера +++++++++++++++++++++++++++++++++++++++++++++++++++++
         btAdapter = BluetoothAdapter.getDefaultAdapter();  
@@ -194,7 +198,6 @@ public class MainActivity extends AppCompatActivity {
         Log.e(TAG, "...DISPLAY_DPI..." + DISPLAY_DPI);
 
        //+**********************************************************************************************************
-        Context saveContext = this;
         imageReader = ImageReader.newInstance(DISPLAY_WIDTH, DISPLAY_HEIGHT, PixelFormat.RGBA_8888, 2); // 0x1 - формат RGBA_8888I mageFormat.JPEG
         mProjectionManager = (MediaProjectionManager) getSystemService
                 (Context.MEDIA_PROJECTION_SERVICE);
@@ -211,52 +214,68 @@ public class MainActivity extends AppCompatActivity {
         mToggleButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if(mcheckBox_speed.isChecked()){   // проверяем какие опции распознавания выбраны на стартовом экране
-                    Speed_is_checked = 1;
-                }
-                if(mcheckBox_turns.isChecked()){
-                    Turns_is_checked = 1;
-                }
-                if(mcheckBox_speed_cams_yandex.isChecked()){
-                    Speed_cams_ya_is_checked = 1;
-                }
-                if(mcheckBox_speed_cams_mapcam.isChecked()){
-                    Speed_cams_mapcam_is_checked = 1;
-                }
-                // проверяем разрешения и запускаем получение картинки через интент
-                serviceIntent.putExtra("inputExtra", "Screen Recording in Progress");
-                ContextCompat.startForegroundService(saveContext, serviceIntent);
-                if (ContextCompat.checkSelfPermission(MainActivity.this,
-                        Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                    if (ActivityCompat.shouldShowRequestPermissionRationale
-                            (MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
-                        mToggleButton.setChecked(false);
-
-                        Snackbar.make(findViewById(android.R.id.content), R.string.label_permissions,
-                                Snackbar.LENGTH_INDEFINITE).setAction("ENABLE",
-                                new View.OnClickListener() {
-                                    @Override
-                                    public void onClick(View v) {
-                                        ActivityCompat.requestPermissions(MainActivity.this,
-                                                new String[]{Manifest.permission
-                                                        .WRITE_EXTERNAL_STORAGE},
-                                                REQUEST_PERMISSIONS);
-                                    }
-                                }).show();
-                    } else {
-                        ActivityCompat.requestPermissions(MainActivity.this,
-                                new String[]{Manifest.permission
-                                        .WRITE_EXTERNAL_STORAGE},
-                                REQUEST_PERMISSIONS);
-                    }
-                } else {
-                   onToggleSave(v); // обработчик картинки
-                }
+                beginSession();
             }
         });
 
         // Keep the HC-05 link alive for the whole lifetime of the activity.
         startBtMonitor();
+
+        // Auto-start when the app was opened by the vehicle tag. It is deferred to
+        // onResume(), because requesting the screen-capture consent requires the
+        // activity to be in the foreground already.
+        autoStartPending = launchedFromNfc;
+    }
+
+    /**
+     * Starts the capture/recognition/transmission session. Shared by the START
+     * button and by the NFC auto-start.
+     */
+    private void beginSession() {
+        if (!mToggleButton.isChecked()) {
+            mToggleButton.setChecked(true);
+        }
+        if(mcheckBox_speed.isChecked()){   // проверяем какие опции распознавания выбраны на стартовом экране
+            Speed_is_checked = 1;
+        }
+        if(mcheckBox_turns.isChecked()){
+            Turns_is_checked = 1;
+        }
+        if(mcheckBox_speed_cams_yandex.isChecked()){
+            Speed_cams_ya_is_checked = 1;
+        }
+        if(mcheckBox_speed_cams_mapcam.isChecked()){
+            Speed_cams_mapcam_is_checked = 1;
+        }
+        // проверяем разрешения и запускаем получение картинки через интент
+        serviceIntent.putExtra("inputExtra", "Screen Recording in Progress");
+        ContextCompat.startForegroundService(this, serviceIntent);
+        if (ContextCompat.checkSelfPermission(this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            if (ActivityCompat.shouldShowRequestPermissionRationale
+                    (this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+                mToggleButton.setChecked(false);
+
+                Snackbar.make(findViewById(android.R.id.content), R.string.label_permissions,
+                        Snackbar.LENGTH_INDEFINITE).setAction("ENABLE",
+                        new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                ActivityCompat.requestPermissions(MainActivity.this,
+                                        new String[]{Manifest.permission
+                                                .WRITE_EXTERNAL_STORAGE},
+                                        REQUEST_PERMISSIONS);
+                            }
+                        }).show();
+            } else {
+                ActivityCompat.requestPermissions(MainActivity.this,
+                        new String[]{Manifest.permission
+                                .WRITE_EXTERNAL_STORAGE},
+                        REQUEST_PERMISSIONS);
+            }
+        } else {
+            onToggleSave(mToggleButton); // обработчик картинки
+        }
     }
 
     @Override
@@ -278,6 +297,13 @@ public class MainActivity extends AppCompatActivity {
                             | NfcAdapter.FLAG_READER_NFC_V,
                     options);
             Log.d(TAG, "NFC: reader mode enabled");
+        }
+
+        // Auto-start once the activity is actually resumed (cold start from tag).
+        if (autoStartPending) {
+            autoStartPending = false;
+            Log.d(TAG, "NFC: автозапуск сессии");
+            beginSession();
         }
     }
 
@@ -401,6 +427,30 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG, "NFC onNewIntent tech UID=" + uid
                     + " match=" + TARGET_NFC_UID.equalsIgnoreCase(uid));
         }
+
+        // The app was already open and the tag was tapped again: (re)start the
+        // session unless it is already running.
+        if (isNfcTriggered(intent) && !sessionActive && mToggleButton != null) {
+            Log.d(TAG, "NFC: автозапуск сессии (onNewIntent)");
+            beginSession();
+        }
+    }
+
+    /** True when the given intent was produced by tapping the configured NFC tag. */
+    private boolean isNfcTriggered(Intent intent) {
+        if (intent == null) {
+            return false;
+        }
+        String action = intent.getAction();
+        if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
+            Uri data = intent.getData();
+            return data != null && NFC_TRIGGER_URI.equals(data.toString());
+        }
+        if (NfcAdapter.ACTION_TECH_DISCOVERED.equals(action)) {
+            Tag tag = tagFromIntent(intent);
+            return tag != null && TARGET_NFC_UID.equalsIgnoreCase(bytesToHex(tag.getId()));
+        }
+        return false;
     }
 
     @Override
